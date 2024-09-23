@@ -63,6 +63,7 @@ Notes:
 #include "machine/timer.h"
 #include "sound/okim6295.h"
 #include "sound/ymopl.h"
+#include "machine/nvram.h"
 
 #include "emupal.h"
 #include "screen.h"
@@ -710,6 +711,7 @@ private:
 	u8 m_input_select;
 	u8 m_dsw_select;
 	u8 m_scramble_data;
+	u8 m_scramble_data2;
 	u8 m_igs022_latch;
 
 	// IGS029 protection (communication)
@@ -812,8 +814,12 @@ private:
 
 	u8 sdmg2_keys_joy_r();
 	void sdmg2_keys_hopper_w(u8 data);
+	u16 sdmg2_checksum2_r(offs_t offset);
+	void sdmg2_checksum2_w(offs_t offset, u8 data);
 
 	u8 sdmg2p_keys_r();
+	void sdmg2p_oki_bank_w(u8 data);
+	void sdmg2p_counter_w(u8 data);
 
 	void slqz2_sound_hopper_w(u8 data);
 	u8 slqz2_scramble_data_r();
@@ -901,6 +907,7 @@ void igs017_state::machine_start()
 	save_item(NAME(m_input_select));
 	save_item(NAME(m_dsw_select));
 	save_item(NAME(m_scramble_data));
+	save_item(NAME(m_scramble_data2));
 	save_item(NAME(m_igs022_latch));
 
 	save_item(NAME(m_igs029_send_data));
@@ -916,6 +923,7 @@ void igs017_state::machine_reset()
 {
 	m_input_select = m_dsw_select = 0xff;
 	m_scramble_data = 0;
+	m_scramble_data2 = 0;
 
 	m_igs029_send_len = m_igs029_recv_len = 0;
 	m_igs029_mgcs_long = 0;
@@ -1393,6 +1401,34 @@ void igs017_state::init_cpoker2()
 
 
 // sdmg2
+u16 igs017_state::sdmg2_checksum2_r(offs_t offset)
+{
+	u8 x = m_scramble_data2;
+	if ((((x & 1) == 0) && ((x & 4) == 0)) ||(x & 2))
+		return 1 << 9;
+	else
+		return 0;
+}
+
+void igs017_state::sdmg2_checksum2_w(offs_t offset, u8 data)
+{
+		u8 x = m_scramble_data2;
+		switch (data)
+	{
+		case 0xff:
+			m_scramble_data2 = 0;
+			break;
+		case 0x21:
+			m_scramble_data2 = ((x >> 1) & x & 1) | ((((x >> 2) & 1) << 1) & 2) | (((~(x & 1) | ((x >> 1) & 1)) << 2) & 4);
+			break;
+		case 0x55:
+			m_scramble_data2 ++;
+			break;
+
+		default:
+		logerror("%s: warning, unknown scramble data written in %04x = %02x\n", machine().describe_context(), offset, data);
+	}
+}
 
 void igs017_state::init_sdmg2()
 {
@@ -1442,6 +1478,20 @@ void igs017_state::init_sdmg2()
 
 		rom[i] = x;
 	}
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x10140, 0x10140, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x10250, 0x10250, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x10348, 0x10348, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x10456, 0x10456, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x104ec, 0x104ec, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_write_handler(0x105d0, 0x105d0, write8sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_w)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x10632, 0x10633, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x106a8, 0x106a9, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x106aa, 0x106ab, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x106bc, 0x106bd, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x10704, 0x10705, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x1073e, 0x1073f, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x107c0, 0x107c1, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
+	m_maincpu->space(AS_PROGRAM).install_read_handler(0x107ce, 0x107cf, read16sm_delegate(*this, FUNC(igs017_state::sdmg2_checksum2_r)));
 }
 
 // sdmg2p
@@ -1470,7 +1520,7 @@ void igs017_state::init_sdmg2p()
 		rom[i] = x;
 	}
 
-//  m_igs_string->dump("sdmg2p_string.key", 0x7f512, 0x?????, true);
+  //m_igs_string->dump("sdmg2p_string.key", 0x7f512, 0x7f426, true);
 }
 
 // mgdh, mgdha
@@ -2348,7 +2398,7 @@ u8 igs017_state::mgcs_keys_joy_r()
 void igs017_state::mgcs_map(address_map &map)
 {
 	map(0x000000, 0x07ffff).rom();
-	map(0x300000, 0x303fff).ram();
+	map(0x300000, 0x303fff).ram().share("nvram");
 
 	map(0x49c000, 0x49c001).nopr().w(m_igs_mux, FUNC(igs_mux_device::address_w)).umask16(0x00ff); // clr.w dummy read
 	map(0x49c002, 0x49c003).rw(m_igs_mux, FUNC(igs_mux_device::data_r), FUNC(igs_mux_device::data_w)).umask16(0x00ff);
@@ -2372,7 +2422,7 @@ void igs017_state::mgcs_mux_map(address_map &map)
 void igs017_state::mgcsa_map(address_map &map)
 {
 	map(0x000000, 0x07ffff).rom();
-	map(0x100000, 0x103fff).ram();
+	map(0x100000, 0x103fff).ram().share("nvram");
 
 	map(0x49c000, 0x49c001).nopr().w(m_igs_mux, FUNC(igs_mux_device::address_w)).umask16(0x00ff); // clr.w dummy read
 	map(0x49c002, 0x49c003).rw(m_igs_mux, FUNC(igs_mux_device::data_r), FUNC(igs_mux_device::data_w)).umask16(0x00ff);
@@ -2396,7 +2446,7 @@ void igs017_state::sdmg2_map(address_map &map)
 	map(0x002007, 0x002007).w(m_igs_incdec, FUNC(igs_incdec_device::inc_w));
 	map(0x00200b, 0x00200b).r(m_igs_incdec, FUNC(igs_incdec_device::result_r));
 
-	map(0x1f0000, 0x1fffff).ram();
+	map(0x1f0000, 0x1fffff).ram().share("nvram");
 
 	map(0x200000, 0x20ffff).rw(m_igs017_igs031, FUNC(igs017_igs031_device::read), FUNC(igs017_igs031_device::write)).umask16(0x00ff);
 
@@ -2439,7 +2489,7 @@ void igs017_state::sdmg2_mux_map(address_map &map)
 void igs017_state::mgdh_map(address_map &map)
 {
 	map(0x000000, 0x07ffff).rom();
-	map(0x600000, 0x603fff).ram();
+	map(0x600000, 0x603fff).ram().share("nvram");
 
 	map(0x876000, 0x876001).nopr().w(m_igs_mux, FUNC(igs_mux_device::address_w)).umask16(0x00ff); // clr.w dummy read
 	map(0x876002, 0x876003).rw(m_igs_mux, FUNC(igs_mux_device::data_r), FUNC(igs_mux_device::data_w)).umask16(0x00ff);
@@ -2506,11 +2556,26 @@ u8 igs017_state::sdmg2p_keys_r()
 	return bitswap<8>(ret, 5, 4, 3, 2, 1, 0, 7, 6);
 }
 
+void igs017_state::sdmg2p_oki_bank_w(u8 data)
+{
+	m_oki->set_rom_bank(BIT(data, 7));
+}
+
+void igs017_state::sdmg2p_counter_w(u8 data)
+{
+	machine().bookkeeping().coin_counter_w(0, BIT(data, 0)); // coin in
+}
+
 void igs017_state::sdmg2p_map(address_map &map)
 {
 	map(0x000000, 0x07ffff).rom();
+	
+	map(0x003041, 0x003041).w(m_igs_incdec, FUNC(igs_incdec_device::reset_w));
+	map(0x003043, 0x003043).w(m_igs_incdec, FUNC(igs_incdec_device::dec_w));
+	map(0x003047, 0x003047).w(m_igs_incdec, FUNC(igs_incdec_device::inc_w));
+	map(0x00304a, 0x00304b).r(m_igs_incdec, FUNC(igs_incdec_device::result_r));
 
-	map(0x100000, 0x103fff).ram();
+	map(0x100000, 0x103fff).ram().share("nvram");
 
 	map(0x38d000, 0x38d001).nopr().w(m_igs_mux, FUNC(igs_mux_device::address_w)).umask16(0x00ff); // clr.w dummy read
 	map(0x38d002, 0x38d003).rw(m_igs_mux, FUNC(igs_mux_device::data_r), FUNC(igs_mux_device::data_w)).umask16(0x00ff);
@@ -2523,10 +2588,10 @@ void igs017_state::sdmg2p_map(address_map &map)
 void igs017_state::sdmg2p_mux_map(address_map &map) // TODO: hopper motor w
 {
 	map.unmap_value_high();
-	map(0x00, 0x00).r(FUNC(igs017_state::sdmg2p_keys_r));
+	map(0x00, 0x00).r(FUNC(igs017_state::sdmg2p_keys_r)).w(FUNC(igs017_state::sdmg2p_counter_w));
 	map(0x01, 0x01).portr("JOY");
 	map(0x02, 0x02).portr("BUTTONS").w(FUNC(igs017_state::mgdh_keys_hopper_w));
-	map(0x03, 0x03).portr("COINS").w(FUNC(igs017_state::mgdh_counter_w));
+	map(0x03, 0x03).portr("COINS").w(FUNC(igs017_state::sdmg2p_oki_bank_w));
 
 	igs_string_mux_map(map);
 }
@@ -2605,7 +2670,7 @@ void igs017_state::lhzb2_map(address_map &map)
 
 	map(0x100000, 0x103fff).ram().share("igs022:sharedprotram"); // Shared with protection device
 
-	map(0x500000, 0x503fff).ram();
+	map(0x500000, 0x503fff).ram().share("nvram");
 
 	map(0x910000, 0x910001).nopr().w(m_igs_mux, FUNC(igs_mux_device::address_w)).umask16(0x00ff); // clr.w dummy read
 	map(0x910002, 0x910003).rw(m_igs_mux, FUNC(igs_mux_device::data_r), FUNC(igs_mux_device::data_w)).umask16(0x00ff);
@@ -2738,7 +2803,7 @@ void igs017_state::lhzb2a_map(address_map &map)
 	map(0x003207, 0x003207).w(m_igs_incdec, FUNC(igs_incdec_device::inc_w));
 	map(0x00320b, 0x00320b).r(m_igs_incdec, FUNC(igs_incdec_device::result_r));
 
-	map(0x500000, 0x503fff).ram();
+	map(0x500000, 0x503fff).ram().share("nvram");
 //  map(0x910000, 0x910003) accesses appear to be from leftover code where the final checks were disabled
 
 	map(0xb00000, 0xb0ffff).rw(m_igs017_igs031, FUNC(igs017_igs031_device::read), FUNC(igs017_igs031_device::write)).umask16(0x00ff);
@@ -2764,7 +2829,7 @@ void igs017_state::lhzb2a_mux_map(address_map &map)
 void igs017_state::slqz2_map(address_map &map)
 {
 	map(0x000000, 0x07ffff).rom();
-	map(0x100000, 0x103fff).ram();
+	map(0x100000, 0x103fff).ram().share("nvram");
 
 	map(0x300000, 0x303fff).ram().share("igs022:sharedprotram"); // Shared with protection device
 
@@ -4622,6 +4687,8 @@ void igs017_state::mgcs(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::mgcs_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::mgcs_mux_map);
@@ -4656,6 +4723,8 @@ void igs017_state::lhzb2(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::lhzb2_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::lhzb2_mux_map);
@@ -4691,6 +4760,8 @@ void igs017_state::lhzb2a(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::lhzb2a_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	MCFG_MACHINE_RESET_OVERRIDE(igs017_state, lhzb2a)
 
@@ -4728,6 +4799,8 @@ void igs017_state::slqz2(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::slqz2_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::slqz2_mux_map);
@@ -4757,6 +4830,8 @@ void igs017_state::sdmg2(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::sdmg2_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::sdmg2_mux_map);
@@ -4792,6 +4867,8 @@ void igs017_state::mgdha(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::mgdh_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgdh_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::mgdha_mux_map);
@@ -4818,6 +4895,8 @@ void igs017_state::sdmg2p(machine_config &config)
 	M68000(config, m_maincpu, 22_MHz_XTAL / 2);
 	m_maincpu->set_addrmap(AS_PROGRAM, &igs017_state::sdmg2p_map);
 	TIMER(config, "scantimer").configure_scanline(FUNC(igs017_state::mgcs_interrupt), "screen", 0, 1);
+	
+	NVRAM(config, "nvram", nvram_device::DEFAULT_ALL_0);
 
 	// i/o
 	m_igs_mux->set_addrmap(0, &igs017_state::sdmg2p_mux_map);
@@ -4829,6 +4908,8 @@ void igs017_state::sdmg2p(machine_config &config)
 	HOPPER(config, m_hopper, attotime::from_msec(50));
 
 	IGS_STRING(config, m_igs_string, 0);
+	
+	IGS_INCDEC(config, m_igs_incdec, 0);
 }
 
 
@@ -5320,10 +5401,10 @@ ROM_START( sdmg2p )
 	ROM_LOAD( "ma.dy_text.u18", 0x000000, 0x080000, CRC(e46a3a52) SHA1(7b3f113170904dc474712a6a76162a8ee5dbd318) )
 
 	ROM_REGION( 0x80000, "oki", 0 )
-	ROM_LOAD( "ma.dy_sp.u14", 0x00000, 0x80000, CRC(b31c6349) SHA1(9e8e5b029e1eff47581f99ecf2da3f17bee01f32) ) // 1ST AND 2ND HALF IDENTICAL
+	ROM_LOAD( "ma.dy_sp.u14", 0x00000, 0x80000, BAD_DUMP CRC(b31c6349) SHA1(9e8e5b029e1eff47581f99ecf2da3f17bee01f32) ) // 1ST AND 2ND HALF IDENTICAL
 
 	ROM_REGION( 0xec, "igs_string", 0 )
-	ROM_LOAD( "sdmg2p_string.key", 0x00, 0xec, NO_DUMP )
+	ROM_LOAD( "sdmg2p_string.key", 0x00, 0xec, CRC(C134A304) SHA1(397EF67EBB6C63A6D4D1405A237AA40A4D9A3D43) )
 ROM_END
 
 /***************************************************************************
